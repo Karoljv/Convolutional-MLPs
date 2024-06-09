@@ -1,6 +1,6 @@
 dataset: cifar10
 num_classes: 10
-img_size: 224
+img_size: 32
 mean:
     - 0.4914
     - 0.4822

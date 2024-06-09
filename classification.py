@@ -33,8 +33,8 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as NativeDDP
 
 from timm.data import create_dataset, create_loader, resolve_data_config, Mixup, FastCollateMixup, AugMixDataset
-from timm.models import create_model, safe_model_name, resume_checkpoint, load_checkpoint, \
-    convert_splitbn_model, model_parameters
+from timm.models import create_model, safe_model_name, resume_checkpoint, load_checkpoint, model_parameters
+from timm.models.layers import convert_splitbn_model
 from timm.utils import *
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy, JsdCrossEntropy
 from timm.optim import create_optimizer_v2, optimizer_kwargs
@@ -354,9 +354,9 @@ def main():
                         "Install NVIDA apex or upgrade to PyTorch 1.6")
 
     random_seed(args.seed, args.rank)
-
+    print(args.model)
     model = create_model(
-        args.model,
+        args.model, 
         pretrained=args.pretrained,
         num_classes=args.num_classes,
         drop_rate=args.drop,
@@ -368,7 +368,7 @@ def main():
         bn_momentum=args.bn_momentum,
         bn_eps=args.bn_eps,
         scriptable=args.torchscript,
-        checkpoint_path=args.initial_checkpoint)
+        checkpoint_path=args.initial_checkpoint) 
     if args.num_classes is None:
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
         args.num_classes = model.num_classes  # FIXME handle model default vs config num_classes more elegantly
@@ -504,8 +504,8 @@ def main():
             batch_size=args.batch_size, repeats=args.epoch_repeats)
         dataset_eval = create_dataset(
             args.dataset, root=args.data_dir, split=args.val_split, is_training=False, batch_size=args.batch_size)
-
-    dist.barrier()
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        dist.barrier()
     # setup mixup / cutmix
     collate_fn = None
     mixup_fn = None

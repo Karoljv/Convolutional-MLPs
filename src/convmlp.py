@@ -1,17 +1,7 @@
-from torch.hub import load_state_dict_from_url
-import torch.nn as nn
+from torch import nn
+from torch.nn import MultiheadAttention
 from .utils.tokenizer import ConvTokenizer
 from .utils.modules import ConvStage, BasicStage
-
-
-__all__ = ['ConvMLP', 'convmlp_s', 'convmlp_m', 'convmlp_l']
-
-
-model_urls = {
-    'convmlp_s': 'https://shi-labs.com/projects/convmlp/checkpoints/convmlp_s_imagenet.pth',
-    'convmlp_m': 'https://shi-labs.com/projects/convmlp/checkpoints/convmlp_m_imagenet.pth',
-    'convmlp_l': 'https://shi-labs.com/projects/convmlp/checkpoints/convmlp_l_imagenet.pth',
-}
 
 
 class ConvMLP(nn.Module):
@@ -21,8 +11,9 @@ class ConvMLP(nn.Module):
                  mlp_ratios,
                  channels=64,
                  n_conv_blocks=3,
+                 num_heads=4,  # głowy
                  classifier_head=True,
-                 num_classes=1000,
+                 num_classes=10,
                  *args, **kwargs):
         super(ConvMLP, self).__init__()
         assert len(blocks) == len(dims) == len(mlp_ratios), \
@@ -42,6 +33,11 @@ class ConvMLP(nn.Module):
                                stochastic_depth_rate=0.1,
                                downsample=(i + 1 < len(blocks)))
             self.stages.append(stage)
+
+
+        #Dodanie bloku atencyjnego
+        self.multihead_attn = MultiheadAttention(embed_dim=dims[-1], num_heads=num_heads)
+
         if classifier_head:
             self.norm = nn.LayerNorm(dims[-1])
             self.head = nn.Linear(dims[-1], num_classes)
@@ -55,9 +51,19 @@ class ConvMLP(nn.Module):
         x = x.permute(0, 2, 3, 1)
         for stage in self.stages:
             x = stage(x)
+        
+        # Reshape i permutacja
+        B, H, W, C = x.shape
+        x = x.reshape(B, H * W, C).permute(1, 0, 2)  # (S, B, E) 
+        
+        # multi-head attention
+        x, _ = self.multihead_attn(x, x, x)
+        
+        # reshape do orginalu
+        x = x.permute(1, 0, 2).reshape(B, H, W, C)
+        
         if self.head is None:
             return x
-        B, _, _, C = x.shape
         x = x.reshape(B, -1, C)
         x = self.norm(x)
         x = x.mean(dim=1)
@@ -79,16 +85,10 @@ class ConvMLP(nn.Module):
             nn.init.constant_(m.weight, 1.)
             nn.init.constant_(m.bias, 0.)
 
-
 def _convmlp(arch, pretrained, progress, classifier_head, blocks, dims, mlp_ratios, *args, **kwargs):
     model = ConvMLP(blocks=blocks, dims=dims, mlp_ratios=mlp_ratios,
                     classifier_head=classifier_head, *args, **kwargs)
-    if pretrained and arch in model_urls:
-        state_dict = load_state_dict_from_url(model_urls[arch],
-                                              progress=progress)
-        model.load_state_dict(state_dict)
     return model
-
 
 def convmlp_s(pretrained=False, progress=False, classifier_head=True, *args, **kwargs):
     return _convmlp('convmlp_s', pretrained=pretrained, progress=progress,
@@ -96,13 +96,11 @@ def convmlp_s(pretrained=False, progress=False, classifier_head=True, *args, **k
                     channels=64, n_conv_blocks=2, classifier_head=classifier_head,
                     *args, **kwargs)
 
-
 def convmlp_m(pretrained=False, progress=False, classifier_head=True, *args, **kwargs):
     return _convmlp('convmlp_m', pretrained=pretrained, progress=progress,
                     blocks=[3, 6, 3], mlp_ratios=[3, 3, 3], dims=[128, 256, 512],
                     channels=64, n_conv_blocks=3, classifier_head=classifier_head,
                     *args, **kwargs)
-
 
 def convmlp_l(pretrained=False, progress=False, classifier_head=True, *args, **kwargs):
     return _convmlp('convmlp_l', pretrained=pretrained, progress=progress,
